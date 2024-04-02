@@ -6,6 +6,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.jobstores.mongodb import MongoDBJobStore, MongoClient
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.jobstores.mongodb import MongoClient 
+from apscheduler.executors.pool import ProcessPoolExecutor, ThreadPoolExecutor
 
 
 # config
@@ -27,9 +28,11 @@ class MongoDBLock:
 
     def release(self, lock_name):
         self.collection.delete_one({'_id': lock_name})
+        # wait a bit so that other concurrent triggers won't acquire
+        time.sleep(0.2)
 
 
-def distributed_run(lock_manager):
+def _distributed_run(lock_manager):
     def decorator(func):
         func_name = func.__name__
         def wrapper(*args, **kwargs):
@@ -54,15 +57,15 @@ def distributed_run(lock_manager):
     return decorator
 
 
-def add_job(func_name):
+def add_job(func_name, trigger):
     # job_name = func.__name__
     job_name = func_name
     jobs = scheduler.get_jobs(jobstore='default')
     if not [j for j in jobs if j.id == job_name]:
-        scheduler.add_job(f"__main__:{job_name}", trigger=IntervalTrigger(seconds=3), id=job_name)
+        scheduler.add_job(f"__main__:{job_name}", trigger=trigger, id=job_name, name=job_name)
 
 
-def my_decorator(func):
+def distributed_run(func):
     lock_manager = MongoDBLock(locks_db)
     def wrapper(*args, **kwargs):
         if lock_manager.acquire(func.__name__):
@@ -90,16 +93,21 @@ job_defaults = {
     'max_instances': 1
 }
 
+executors = {
+    'default': ThreadPoolExecutor(20),
+    'processpool': ProcessPoolExecutor(5)
+}
+
 
 scheduler = BackgroundScheduler()
-scheduler.configure(jobstores=jobstore, job_defaults=job_defaults)
+scheduler.configure(jobstores=jobstore, job_defaults=job_defaults, executors=executors)
 scheduler.start()
 
 
-@my_decorator
+@distributed_run
 def foo_job():
     print('hello from foo job!', f"{time.time()}")
-add_job('foo_job')
+add_job('foo_job', trigger=IntervalTrigger(seconds=3))
 
 
 # that's it - form here it's only FastAPI code
@@ -119,7 +127,7 @@ async def list_jobs(r: fastapi.Request) -> dict:
 port=8000
 while port<8010:
     try:
-        uvicorn.run(app, port=port)
+        uvicorn.run(app, port=port, reload=False)
     except KeyboardInterrupt:
         break
     except:
