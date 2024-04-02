@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  scheduler:
+    build: .
+    container_name: scheduler
+    volumes:
+      - ./dscheduler.py:/app/dscheduler.py  # Mount your script to the container
+    environment:
+      - MONGO_URI=mongodb://mongo:27017/apscheduler
+    depends_on:
+      - mongo
+
+  # apscheduler_node2:
+  #   image: python:3.10-slim-bookworm
+  #   container_name: apscheduler_node2
+  #   volumes:
+  #     - ./dscheduler.py:/app/script.py  # Mount your script to the container
+  #   environment:
+  #     - MONGO_URI=mongodb://mongo:27017/apscheduler
+  #   depends_on:
+  #     - mongo
+
+  mongo:
+    image: mongo
+    container_name: mongo
+    # ports:
+    #   - "27017:27017"
+    network_mode: "host"
